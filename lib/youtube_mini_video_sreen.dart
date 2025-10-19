@@ -12,10 +12,73 @@ class _YoutubeMiniVideoSreenState extends State<YoutubeMiniVideoSreen> {
   final double minExtent = 0.3;
   final double maxExtent = 1.0;
 
+  // Thêm các state cho animate duy nhất 1 video box
   double extent = 1.0;
   bool isMiniPlayer = false;
   bool isSheetVisible = false;
-  late int curIndexVideo;
+  int curIndexVideo = 0;
+
+  double left = 0;
+  double top = 0;
+
+  // padding cách mép màn hình cho mini-player
+  final double miniMargin = 16.0;
+
+  // Các góc màn hình
+  Offset getCorner(
+    int corner,
+    double miniW,
+    double miniH,
+    double screenW,
+    double screenH,
+  ) {
+    switch (corner) {
+      case 0: // Top-left
+        return Offset(miniMargin, miniMargin);
+      case 1: // Top-right
+        return Offset(screenW - miniW - miniMargin, miniMargin);
+      case 2: // Bottom-left
+        return Offset(miniMargin, screenH - miniH - miniMargin - 80);
+      case 3: // Bottom-right
+        return Offset(
+          screenW - miniW - miniMargin,
+          screenH - miniH - miniMargin - 80,
+        );
+      default:
+        return Offset(
+          screenW - miniW - miniMargin,
+          screenH - miniH - miniMargin - 80,
+        );
+    }
+  }
+
+  int findNearestCorner(
+    double l,
+    double t,
+    double miniW,
+    double miniH,
+    double screenW,
+    double screenH,
+  ) {
+    final corners = [
+      getCorner(0, miniW, miniH, screenW, screenH),
+      getCorner(1, miniW, miniH, screenW, screenH),
+      getCorner(2, miniW, miniH, screenW, screenH),
+      getCorner(3, miniW, miniH, screenW, screenH),
+    ];
+    double minDist = double.infinity;
+    int res = 3;
+    for (int i = 0; i < 4; ++i) {
+      double dx = l - corners[i].dx;
+      double dy = t - corners[i].dy;
+      double d = dx * dx + dy * dy;
+      if (d < minDist) {
+        minDist = d;
+        res = i;
+      }
+    }
+    return res;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,8 +94,23 @@ class _YoutubeMiniVideoSreenState extends State<YoutubeMiniVideoSreen> {
     final miniW = 200.0;
     final miniH = miniW * 9 / 16;
 
-    double leftMini = screenW - miniW;
-    double topMini = screenH - miniH - 80;
+    // Tính toán vị trí và size video tuỳ theo trạng thái
+    double videoW = lerpDouble(miniW, fullW, extent)!;
+    double videoH = lerpDouble(miniH, fullH, extent)!;
+    double videoLeft = isMiniPlayer
+        ? left.clamp(miniMargin, screenW - miniW - miniMargin)
+        : 0.0;
+    double videoTop = isMiniPlayer
+        ? top.clamp(miniMargin, screenH - miniH - miniMargin - 80)
+        : 0.0;
+
+    // Nếu vừa chuyển sang mini-player thì gắn vị trí mặc định là góc dưới bên phải (có margin)
+    if (isMiniPlayer && left == 0 && top == 0) {
+      videoLeft = screenW - miniW - miniMargin;
+      videoTop = screenH - miniH - miniMargin - 80;
+      left = videoLeft;
+      top = videoTop;
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -46,8 +124,9 @@ class _YoutubeMiniVideoSreenState extends State<YoutubeMiniVideoSreen> {
                   onTap: () {
                     setState(() {
                       isMiniPlayer = false;
-                      curIndexVideo = index;
                       isSheetVisible = true;
+                      extent = 1.0;
+                      curIndexVideo = index;
                     });
                   },
                   child: Container(
@@ -68,48 +147,115 @@ class _YoutubeMiniVideoSreenState extends State<YoutubeMiniVideoSreen> {
               ),
             ),
 
-            if (isMiniPlayer)
-              StatefulBuilder(
-                builder: (context, StateSetter stateSetter) => Positioned(
-                  left: leftMini,
-                  top: topMini,
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        isMiniPlayer = false;
-                        isSheetVisible = true;
-                      });
-                    },
-                    onPanUpdate: (details) {
-                      stateSetter(() {
-                        leftMini += details.delta.dx;
-                        topMini += details.delta.dy;
-                      });
-                    },
-                    onPanEnd: (details) {
-                      if (topMini + miniH / 2 > screenH - miniH / 2 - 10) {
+            // Video box duy nhất (animate vị trí + size + drag mini + snap to 4 góc)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.ease,
+              left: videoLeft,
+              top: videoTop,
+              width: videoW,
+              height: videoH,
+              child: GestureDetector(
+                onTap: () {
+                  if (isMiniPlayer) {
+                    setState(() {
+                      isMiniPlayer = false;
+                      isSheetVisible = true;
+                      extent = 1.0;
+                      // animate về center
+                      left = 0;
+                      top = 0;
+                    });
+                  }
+                },
+                onPanUpdate: isMiniPlayer
+                    ? (details) {
                         setState(() {
-                          isMiniPlayer = false;
+                          left = (left + details.delta.dx).clamp(
+                            miniMargin,
+                            screenW - miniW - miniMargin,
+                          );
+                          // KHÔNG clamp dưới nữa để kéo xuống được
+                          top = (top + details.delta.dy);
+                          if (top < miniMargin) {
+                            top = miniMargin; // chỉ clamp trên
+                          }
                         });
-                        // print("close");
                       }
-                      leftMini = leftMini + miniW / 2 > screenW / 2
-                          ? screenW - miniW
-                          : 0;
-                      topMini = topMini + miniH / 2 > screenH / 2
-                          ? screenH - miniH - 80
-                          : 0;
-                      stateSetter(() {});
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.linear,
-                      width: miniW,
-                      height: miniH,
-                      color: Colors.black,
-                      alignment: Alignment.center,
+                    : null,
+                onPanEnd: isMiniPlayer
+                    ? (details) {
+                        int cornerIdx = findNearestCorner(
+                          left,
+                          top,
+                          miniW,
+                          miniH,
+                          screenW,
+                          screenH,
+                        );
+                        Offset c = getCorner(
+                          cornerIdx,
+                          miniW,
+                          miniH,
+                          screenW,
+                          screenH,
+                        );
+                        // Nếu là góc phải dưới, kiểm tra kéo quá đáy
+                        final double bottomThreshold = 40.0;
+                        final double bottomEdge = screenH - miniMargin - 80;
+                        if (cornerIdx == 3 &&
+                            top > bottomEdge + bottomThreshold) {
+                          setState(() {
+                            isMiniPlayer = false;
+                          });
+                        } else {
+                          setState(() {
+                            left = c.dx;
+                            top = c.dy;
+                          });
+                        }
+                      }
+                    : null,
+                onDoubleTap: () {
+                  if (!isMiniPlayer) {
+                    setState(() {
+                      isMiniPlayer = true;
+                      isSheetVisible = false;
+                      extent = minExtent;
+                      // chuyển sang mặc định góc dưới phải
+                      left = screenW - miniW;
+                      top = screenH - miniH - 80;
+                    });
+                  }
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.ease,
+                  color: Colors.black,
+                  alignment: Alignment.center,
+                  child: Text(
+                    "Video $curIndexVideo",
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                ),
+              ),
+            ),
+
+            // Sheet overlay (không có video nữa, chỉ dữ liệu)
+            if (isSheetVisible)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: videoH,
+                bottom: 0,
+                child: AnimatedOpacity(
+                  opacity: isSheetVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Container(
+                    color: Colors.blueGrey,
+                    child: Center(
                       child: Text(
-                        "Video $curIndexVideo",
+                        "data $curIndexVideo",
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),
@@ -117,101 +263,31 @@ class _YoutubeMiniVideoSreenState extends State<YoutubeMiniVideoSreen> {
                 ),
               ),
 
-            if (isSheetVisible) _buildDraggableSheet(fullW, fullH),
+            // Nút chuyển về mini-player nếu đang ở sheet
+            if (isSheetVisible)
+              Positioned(
+                top: videoH + 16,
+                right: 16,
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.keyboard_arrow_down,
+                    color: Colors.white,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      isSheetVisible = false;
+                      isMiniPlayer = true;
+                      extent = minExtent;
+                      left = screenW - miniW;
+                      top = screenH - miniH - 80;
+                    });
+                  },
+                  color: Colors.black.withValues(alpha: 0.7),
+                ),
+              ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildDraggableSheet(double fullW, double fullH) {
-    double opacity = 1.0;
-    double curW = fullW;
-    double curH = fullH;
-    final GlobalKey redBoxKey = GlobalKey();
-    Offset offset = Offset.zero;
-
-    return StatefulBuilder(
-      builder: (context, StateSetter stateSetter) =>
-          NotificationListener<DraggableScrollableNotification>(
-            onNotification: (notification) {
-              double extent = notification.extent;
-              double t = ((extent - minExtent) / (maxExtent - minExtent)).clamp(
-                0.0,
-                1.0,
-              );
-
-              stateSetter(() {
-                curW = lerpDouble(200, fullW, t)!;
-                curH = lerpDouble(200 * 9 / 16, fullH, t)!;
-              });
-
-              offset =
-                  (redBoxKey.currentContext?.findRenderObject() as RenderBox?)!
-                      .localToGlobal(Offset.zero);
-              if (offset.dy > 60) {
-                opacity = 0;
-              } else {
-                opacity = t * t * t;
-              }
-              return true;
-            },
-            child: NotificationListener<ScrollNotification>(
-              onNotification: (scrollNotification) {
-                if (scrollNotification is ScrollEndNotification &&
-                    offset.dy > 60) {
-                  setState(() {
-                    isSheetVisible = false;
-                    isMiniPlayer = true;
-                  });
-                }
-                return false;
-              },
-              child: DraggableScrollableSheet(
-                initialChildSize: extent,
-                minChildSize: minExtent,
-                maxChildSize: maxExtent,
-                builder: (context, scrollController) => ListView(
-                  controller: scrollController,
-                  children: [
-                    Align(
-                      key: redBoxKey,
-                      alignment: Alignment.topRight,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: curW,
-                        height: curH,
-                        color: Colors.black,
-                        alignment: Alignment.center,
-                        child: Text(
-                          "Video $curIndexVideo",
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: AnimatedOpacity(
-                        opacity: opacity,
-                        duration: const Duration(milliseconds: 200),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: curW,
-                          height: 1000,
-                          color: Colors.blueGrey,
-                          alignment: Alignment.center,
-                          child: Text(
-                            "data $curIndexVideo",
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
     );
   }
 }
